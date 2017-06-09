@@ -1,4 +1,8 @@
+import sys
+sys.path.append("../../")
+
 from scikitlearn_plus.neural_network import MLPClassifier
+
 X = [[0., 0.], [1., 1.]]
 y = [0, 1]
 clf = MLPClassifier(solver='lbfgs', alpha=1e-5,
