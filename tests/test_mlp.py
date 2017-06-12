@@ -9,7 +9,8 @@ y = [0, 1]
 
 # sklearn MLPRegressor
 clf = MLPRegressor(solver='lbfgs', alpha=1e-5,
-                    hidden_layer_sizes=(5, 2), random_state=1)
+                    hidden_layer_sizes=(5, 2), random_state=1,
+                    activation="softmax")
 
 # scikitlearn_plus MLPRegressor
 clf_plus = MLPRegressor_plus(solver='lbfgs', alpha=1e-5,
