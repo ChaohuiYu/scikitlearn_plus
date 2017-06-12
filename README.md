@@ -1,9 +1,10 @@
 scikit-learn plus
 
-A cuda version of sklearn mlp
+A cuda version of sklearn MLPRegressor
 
 
-@inproceedings{sklearn_api,
+@inproceedings
+{sklearn_api,
   author    = {Lars Buitinck and Gilles Louppe and Mathieu Blondel and
                Fabian Pedregosa and Andreas Mueller and Olivier Grisel and
                Vlad Niculae and Peter Prettenhofer and Alexandre Gramfort
