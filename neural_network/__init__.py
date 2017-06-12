@@ -5,14 +5,9 @@ networks.
 
 # License: BSD 3 clause
 
-from .rbm import BernoulliRBM
-
-from .multilayer_perceptron import MLPClassifier
 from .multilayer_perceptron import MLPRegressor
 
-__all__ = ["BernoulliRBM",
-           "MLPClassifier",
-           "MLPRegressor"]
+__all__ = ["MLPRegressor"]
 
 print()
 print("---------------------------------------------------")
