@@ -4,7 +4,7 @@ sys.path.append("../../")
 from scikitlearn_plus.neural_network import MLPRegressor as MLPRegressor_plus
 from sklearn.neural_network import MLPRegressor
 
-X = [[0., 0.], [1., 1.]]
+X = [[0., 0., 0.], [1., 1., 1.]]
 y = [0, 1]
 
 # sklearn MLPRegressor
@@ -20,13 +20,13 @@ clf_plus = MLPRegressor_plus(solver='lbfgs', alpha=1e-5,
 clf.fit(X, y)   
 
 print("------sklearn------")
-print(clf.predict([[2., 2.], [-1., -2.]]))
+print(clf.predict([[2., 2., 2.], [-1., -2., -3.]]))
 print([coef.shape for coef in clf.coefs_])
 print()
 
 clf_plus.fit(X,y)
 
 print("------scikitlearn_plus------")
-print(clf_plus.predict([[2., 2.], [-1., -2.]]))
+print(clf_plus.predict([[2., 2., 2.], [-1., -2., -3.]]))
 print([coef.shape for coef in clf_plus.coefs_])
 print()
