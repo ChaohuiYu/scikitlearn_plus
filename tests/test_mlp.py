@@ -8,12 +8,13 @@ X = [[0., 0., 0.], [1., 1., 1.]]
 y = [0, 1]
 
 # sklearn MLPRegressor
-clf = MLPRegressor(solver='lbfgs', alpha=1e-5,
+clf = MLPRegressor(solver='sgd', alpha=1e-5,
                     hidden_layer_sizes=(5, 2), random_state=1,
-                    activation="softmax")
+                    activation="identity")
+
 
 # scikitlearn_plus MLPRegressor
-clf_plus = MLPRegressor_plus(solver='lbfgs', alpha=1e-5,
+clf_plus = MLPRegressor_plus(solver='sgd', alpha=1e-5,
                     hidden_layer_sizes=(5, 2), random_state=1)
 
 

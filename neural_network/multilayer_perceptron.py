@@ -29,6 +29,9 @@ from sklearn.utils.multiclass import type_of_target
 
 from ..base import RegressorMixin
 
+import pycuda.driver as cuda
+import pycuda.autoinit
+from pycuda.compiler import SourceModule
 
 _STOCHASTIC_SOLVERS = ['sgd', 'adam']
 
@@ -182,8 +185,8 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         grad = _pack(coef_grads, intercept_grads)
         return loss, grad
 
-    def _backprop(self, X, y, activations, deltas, coef_grads,
-                  intercept_grads):
+    def _backprop(self, n_samples, X_gpu, y_gpu, batch_slice_gpu, activations_gpu, deltas_gpu, coef_grads_gpu,
+                  intercept_grads_gpu, intercepts_gpu, coefs_gpu):
         """Compute the MLP loss function and its corresponding derivatives
         with respect to each parameter: weights and bias vectors.
 
@@ -219,19 +222,20 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         coef_grads : list, length = n_layers - 1
         intercept_grads : list, length = n_layers - 1
         """
-        n_samples = X.shape[0]
+        #n_samples = X.shape[0]
 
         # Forward propagate
-        activations = self._forward_pass(activations)
+        forward_pass_gpu(activations_gpu) # TODO
 
         # Get loss
         loss_func_name = self.loss
         if loss_func_name == 'log_loss' and self.out_activation_ == 'logistic':
             loss_func_name = 'binary_log_loss'
-        loss = LOSS_FUNCTIONS[loss_func_name](y, activations[-1])
+        
+        loss = LOSS_FUNCTIONS_GPU[loss_func_name](y_gpu, activations_gpu[-1]) # TODO
         # Add L2 regularization term to loss
         values = np.sum(
-            np.array([np.dot(s.ravel(), s.ravel()) for s in self.coefs_]))
+            np.array([np.dot(s.ravel(), s.ravel()) for s in coefs_gpu])) #TODO
         loss += (0.5 * self.alpha) * values / n_samples
 
         # Backward propagate
@@ -241,23 +245,23 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         # combinations of output activation and loss function:
         # sigmoid and binary cross entropy, softmax and categorical cross
         # entropy, and identity with squared loss
-        deltas[last] = activations[-1] - y
+        deltas_gpu[last] = activations_gpu[-1] - y_gpu # TODO
 
         # Compute gradient for the last layer
-        coef_grads, intercept_grads = self._compute_loss_grad(
-            last, n_samples, activations, deltas, coef_grads, intercept_grads)
+        coef_grads_gpu, intercept_grads_gpu = self._compute_loss_grad_gpu(
+            last, n_samples, activations_gpu, deltas_gpu, coef_grads_gpu, intercept_grads_gpu)
 
         # Iterate over the hidden layers
         for i in range(self.n_layers_ - 2, 0, -1):
-            deltas[i - 1] = safe_sparse_dot(deltas[i], self.coefs_[i].T)
+            deltas_gpu[i - 1] = safe_sparse_dot(deltas_gpu[i], self.coefs_gpu[i].T) # TODO
             inplace_derivative = DERIVATIVES[self.activation]
-            inplace_derivative(activations[i], deltas[i - 1])
+            inplace_derivative(activations_gpu[i], deltas_gpu[i - 1]) # TODO
 
-            coef_grads, intercept_grads = self._compute_loss_grad(
-                i - 1, n_samples, activations, deltas, coef_grads,
-                intercept_grads)
+            coef_grads_gpu, intercept_grads_gpu = self._compute_loss_grad_gpu(
+                i - 1, n_samples, activations_gpu, deltas_gpu, coef_grads_gpu,
+                intercept_grads_gpu) # TODO
 
-        return loss, coef_grads, intercept_grads
+        return loss
 
     def _initialize(self, y, layer_units):
         # set all attributes, allocate weights etc for first call
@@ -498,20 +502,49 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
             batch_size = np.clip(self.batch_size, 1, n_samples)
 
         try:
+            # TODO from here
+            print("hi")
+            print(self.loss, self.n_layers_, self.activation, self.out_activation_, self.alpha)
+            print(activations)
+            print(self.intercepts_)
+            print(self.coefs_)
+
+
+            X_gpu = cuda.mem_alloc(X.nbytes)
+            y_gpu = cuda.mem_alloc(y.nbytes)
+            deltas_gpu = [cuda.mem_alloc(delta.nbytes) for delta in deltas]
+            coef_grads_gpu = [cuda.mem_alloc(coef_grad.nbytes) for coef_grad in coef_grads]
+            intercept_grads_gpu = [cuda.mem_alloc(intercept_grad.nbytes) for intercept_grad in intercept_grads]
+            activations_gpu = [cuda.mem_alloc(activation.nbytes) for activation in activations]
+            intercepts_gpu = [cuda.mem_alloc(intercept.nbytes) for intercept in self.intercepts_]
+            coefs_gpu = [cuda.mem_alloc(coef.nbytes) for coef in self.coefs_]
+
+
+            cuda.memcpy_htod(X_gpu, X)
+            cuda.memcpy_htod(y_gpu, y)
+            for i in range(len(deltas)) : cuda.memcpy_htod(deltas_gpu[i], deltas[i])
+            for i in range(len(coef_grads)) : cuda.memcpy_htod(coef_grads_gpu[i], coef_grads[i])
+            for i in range(len(intercept_grads)) : cuda.memcpy_htod(intercept_grads_gpu[i], intercept_grads[i])
+            for i in range(len(activations)) : cuda.memcpy_htod(activations_gpu[i], activations[i])
+            for i in range(len(self.intercepts_)) : cuda.memcpy_htod(intercepts_gpu[i], self.intercepts_[i])
+            for i in range(len(self.coefs_)) : cuda.memcpy_htod(coefs_gpu[i], self.coefs_[i])
+
+            batch_slices_gpu = gen_batches_gpu(n_samples, batch_size)
+
             for it in range(self.max_iter):
-                X, y = shuffle(X, y, random_state=self._random_state)
+                shuffle_gpu(X_gpu, y_gpu, random_state=self._random_state)
                 accumulated_loss = 0.0
-                for batch_slice in gen_batches(n_samples, batch_size):
-                    activations[0] = X[batch_slice]
-                    batch_loss, coef_grads, intercept_grads = self._backprop(
-                        X[batch_slice], y[batch_slice], activations, deltas,
-                        coef_grads, intercept_grads)
-                    accumulated_loss += batch_loss * (batch_slice.stop -
-                                                      batch_slice.start)
+                for batch_slice_gpu in batch_slices_gpu :
+                    activations_gpu[0] = X_gpu[batch_slice_gpu]
+                    batch_loss = backprop(
+                        n_samples, X_gpu, y_gpu, batch_slice_gpu, activations_gpu, deltas_gpu,
+                        coef_grads_gpu, intercept_grads_gpu, intercepts_gpu, coefs_gpu)
+                    accumulated_loss += batch_loss * (batch_slice_gpu.stop -
+                                                      batch_slice_gpu.start)
 
                     # update weights
-                    grads = coef_grads + intercept_grads
-                    self._optimizer.update_params(grads)
+                    grads_gpu = coef_grads_gpu + intercept_grads_gpu
+                    self._optimizer.update_params(grads_gpu)
 
                 self.n_iter_ += 1
                 self.loss_ = accumulated_loss / X.shape[0]
@@ -554,6 +587,8 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
                         "Stochastic Optimizer: Maximum iterations (%d) "
                         "reached and the optimization hasn't converged yet."
                         % self.max_iter, ConvergenceWarning)
+            # TODO to here
+
         except KeyboardInterrupt:
             warnings.warn("Training interrupted by user.")
 
