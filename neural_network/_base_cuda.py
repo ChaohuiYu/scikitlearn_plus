@@ -11,13 +11,33 @@ import pycuda.driver as cuda
 import pycuda.autoinit
 from pycuda.compiler import SourceModule
 
+import skcuda.misc as misc
+
+
+blockSize = 192
 
 mod = None
 with open("../cuda/_base.cu", "r") as fin:
     mod = SourceModule(fin.read())
 
-clipf = mod.get_function("clipf")
-clip = mod.get_function("clip")
+cuClipf = mod.get_function("clipf")
+cuClip = mod.get_function("clip")
+
+cuSigmoidf = mod.get_function("sigmoidf")
+cuSigmoid = mod.get_function("sigmoid")
+cuTanhf = mod.get_function("myTanhf")
+cuTanh = mod.get_function("myTanh")
+
+cuInplaceReluDerivativef = mod.get_function("inplaceReluDerivativef")
+cuInplaceReluDerivative = mod.get_function("inplaceReluDerivative")
+
+cuSquaredErrorf = mod.get_function("squaredErrorf")
+cuSquaredError = mod.get_function("squaredError")
+cuLogLossf = mod.get_function("logLossf")
+cuLogLoss = mod.get_function("logLoss")
+cuBinaryLogLossf = mod.get_function("binaryLogLossf")
+cuBinaryLogLoss = mod.get_function("binaryLogLoss")
+
 
 def identity(X):
     """Simply return the input array.
@@ -49,7 +69,19 @@ def logistic(X):
     X_new : {array-like, sparse matrix}, shape (n_samples, n_features)
         The transformed data.
     """
-    return 1 / (1 + cumath.exp(-X))
+    if X.dtype == np.float64:
+        cuSigmoid(
+            X.gpudata,
+            np.int32(X.size),
+            block=(blockSize, 1, 1),
+            grid=(int((X.size - 1) / blockSize + 1), 1, 1))
+    else:
+        cuSigmoidf(
+            X.gpudata,
+            np.int32(X.size),
+            block=(blockSize, 1, 1),
+            grid=(int((X.size - 1) / blockSize + 1), 1, 1))
+    return X
 
 
 def tanh(X):
@@ -65,7 +97,19 @@ def tanh(X):
     X_new : {array-like, sparse matrix}, shape (n_samples, n_features)
         The transformed data.
     """
-    return cumath.tanh(X)
+    if X.dtype == np.float64:
+        cuTanh(
+            X.gpudata,
+            np.int32(X.size),
+            block=(blockSize, 1, 1),
+            grid=(int((X.size - 1) / blockSize + 1), 1, 1))
+    else:
+        cuTanhf(
+            X.gpudata,
+            np.int32(X.size),
+            block=(blockSize, 1, 1),
+            grid=(int((X.size - 1) / blockSize + 1), 1, 1))
+    return X
 
 
 def relu(X):
@@ -82,17 +126,21 @@ def relu(X):
         The transformed data.
     """
     if X.dtype == np.float64:
-        clip(
+        cuClip(
             X.gpudata,
             np.float64(0.),
             np.finfo(X.dtype).max,
-            block=(X.size, 1, 1))
+            np.int32(X.size),
+            block=(blockSize, 1, 1),
+            grid=(int((X.size - 1) / blockSize + 1), 1, 1))
     else:
-        clipf(
+        cuClipf(
             X.gpudata,
             np.float32(0.),
             np.float32(np.finfo(X.dtype).max),
-            block=(X.size, 1, 1))
+            np.int32(X.size),
+            block=(blockSize, 1, 1),
+            grid=(int((X.size - 1) / blockSize + 1), 1, 1))
     return X
 
 ACTIVATIONS = {'identity': identity, 'tanh': tanh, 'logistic': logistic,
@@ -166,7 +214,20 @@ def inplace_relu_derivative(Z, delta):
     delta : {array-like}, shape (n_samples, n_features)
          The backpropagated error signal to be modified inplace.
     """
-    delta[Z == 0] = 0
+    if delta.dtype == np.float64:
+        cuInplaceReluDerivative(
+            Z.gpudata,
+            delta.gpudata,
+            np.int32(delta.size),
+            block=(blockSize, 1, 1),
+            grid=(int((delta.size - 1) / blockSize + 1), 1, 1))
+    else:
+        cuInplaceReluDerivativef(
+            Z.gpudata,
+            delta.gpudata,
+            np.int32(delta.size),
+            block=(blockSize, 1, 1),
+            grid=(int((delta.size - 1) / blockSize + 1), 1, 1))
 
 
 DERIVATIVES = {'identity': inplace_identity_derivative,
@@ -191,7 +252,25 @@ def squared_loss(y_true, y_pred):
     loss : float
         The degree to which the samples are correctly predicted.
     """
-    return ((y_true - y_pred) ** 2).mean() / 2
+    tmp_gpu = gpuarray.GPUArray(y_true.shape, y_true.dtype)
+    if y_true.dtype == np.float64:
+        cuSquaredError(
+            y_true.gpudata,
+            y_pred.gpudata,
+            tmp_gpu.gpudata,
+            np.int32(y_true.size),
+            block=(blockSize, 1, 1),
+            grid=(int((y_true.size - 1) / blockSize + 1), 1, 1))
+    else:
+        cuSquaredErrorf(
+            y_true.gpudata,
+            y_pred.gpudata,
+            tmp_gpu.gpudata,
+            np.int32(y_true.size),
+            block=(blockSize, 1, 1),
+            grid=(int((y_true.size - 1) / blockSize + 1), 1, 1))
+    mean = float(misc.mean(tmp_gpu).get())
+    return (mean / 2)
 
 
 def log_loss(y_true, y_prob):
@@ -211,15 +290,50 @@ def log_loss(y_true, y_prob):
     loss : float
         The degree to which the samples are correctly predicted.
     """
-    y_prob = np.clip(y_prob, 1e-10, 1 - 1e-10)
+    if y_prob.dtype == np.float64:
+        cuClip(
+            y_prob.gpudata,
+            np.float64(1e-10),
+            np.float64(1 - 1e-10),
+            np.int32(y_prob.size),
+            block=(blockSize, 1, 1),
+            grid=(int((y_prob.size - 1) / blockSize + 1), 1, 1))
+    else:
+        cuClipf(
+            y_prob.gpudata,
+            np.float32(1e-10),
+            np.float32(1 - 1e-10),
+            np.int32(y_prob.size),
+            block=(blockSize, 1, 1),
+            grid=(int((y_prob.size - 1) / blockSize + 1), 1, 1))
 
     if y_prob.shape[1] == 1:
-        y_prob = np.append(1 - y_prob, y_prob, axis=1)
+        y_prob = gpuarray.to_gpu(np.append(1 - y_prob.get(), y_prob.get(), axis=1))
 
     if y_true.shape[1] == 1:
-        y_true = np.append(1 - y_true, y_true, axis=1)
+        y_true = gpuarray.to_gpu(np.append(1 - y_true.get(), y_true.get(), axis=1))
 
-    return -np.sum(y_true * np.log(y_prob)) / y_prob.shape[0]
+
+    tmp_gpu = gpuarray.GPUArray(y_prob.shape, y_prob.dtype)
+    if y_prob.dtype == np.float64:
+        cuLogLoss(
+            y_true.gpudata,
+            y_prob.gpudata,
+            tmp_gpu.gpudata,
+            np.int32(y_prob.size),
+            block=(blockSize, 1, 1),
+            grid=(int((y_prob.size - 1) / blockSize + 1), 1, 1))
+    else:
+        cuLogLossf(
+            y_true.gpudata,
+            y_prob.gpudata,
+            tmp_gpu.gpudata,
+            np.int32(y_prob.size),
+            block=(blockSize, 1, 1),
+            grid=(int((y_prob.size - 1) / blockSize + 1), 1, 1))
+    #total = float(misc.sum(y_true * tmp_gpu).get())
+    total = float(misc.sum(tmp_gpu).get())
+    return (-total) / y_prob.shape[0]
 
 
 def binary_log_loss(y_true, y_prob):
@@ -242,10 +356,43 @@ def binary_log_loss(y_true, y_prob):
     loss : float
         The degree to which the samples are correctly predicted.
     """
-    y_prob = np.clip(y_prob, 1e-10, 1 - 1e-10)
+    if y_prob.dtype == np.float64:
+        cuClip(
+            y_prob.gpudata,
+            np.float64(1e-10),
+            np.float64(1 - 1e-10),
+            np.int32(y_prob.size),
+            block=(blockSize, 1, 1),
+            grid=(int((y_prob.size - 1) / blockSize + 1), 1, 1))
+    else:
+        cuClipf(
+            y_prob.gpudata,
+            np.float32(1e-10),
+            np.float32(1 - 1e-10),
+            np.int32(y_prob.size),
+            block=(blockSize, 1, 1),
+            grid=(int((y_prob.size - 1) / blockSize + 1), 1, 1))
 
-    return -np.sum(y_true * np.log(y_prob) +
-                   (1 - y_true) * np.log(1 - y_prob)) / y_prob.shape[0]
+    tmp_gpu = gpuarray.GPUArray(y_prob.shape, y_prob.dtype)
+    if y_prob.dtype == np.float64:
+        cuBinaryLogLoss(
+            y_true.gpudata,
+            y_prob.gpudata,
+            tmp_gpu.gpudata,
+            np.int32(y_prob.size),
+            block=(blockSize, 1, 1),
+            grid=(int((y_prob.size - 1) / blockSize + 1), 1, 1))
+    else:
+        cuBinaryLogLossf(
+            y_true.gpudata,
+            y_prob.gpudata,
+            tmp_gpu.gpudata,
+            np.int32(y_prob.size),
+            block=(blockSize, 1, 1),
+            grid=(int((y_prob.size - 1) / blockSize + 1), 1, 1))
+
+    total = float(misc.sum(tmp_gpu).get())
+    return (-total) / y_prob.shape[0]
 
 
 LOSS_FUNCTIONS = {'squared_loss': squared_loss, 'log_loss': log_loss,
