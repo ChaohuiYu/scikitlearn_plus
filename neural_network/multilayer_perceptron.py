@@ -32,6 +32,7 @@ from ..base import RegressorMixin
 import pycuda.driver as cuda
 import pycuda.autoinit
 from pycuda.compiler import SourceModule
+import pycuda.gpuarray as gpuarray
 
 _STOCHASTIC_SOLVERS = ['sgd', 'adam']
 
@@ -249,7 +250,7 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
 
         # Compute gradient for the last layer
         coef_grads_gpu, intercept_grads_gpu = self._compute_loss_grad_gpu(
-            last, n_samples, activations_gpu, deltas_gpu, coef_grads_gpu, intercept_grads_gpu)
+            last, n_samples, activations_gpu, deltas_gpu, coef_grads_gpu, intercept_grads_gpu) # TODO
 
         # Iterate over the hidden layers
         for i in range(self.n_layers_ - 2, 0, -1):
@@ -509,27 +510,22 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
             print(self.intercepts_)
             print(self.coefs_)
 
+			X_gpu = gpuarray.to_gpu(X)
+			y_gpu = gpuarray.to_gpu(y)
 
-            X_gpu = cuda.mem_alloc(X.nbytes)
-            y_gpu = cuda.mem_alloc(y.nbytes)
-            deltas_gpu = [cuda.mem_alloc(delta.nbytes) for delta in deltas]
-            coef_grads_gpu = [cuda.mem_alloc(coef_grad.nbytes) for coef_grad in coef_grads]
-            intercept_grads_gpu = [cuda.mem_alloc(intercept_grad.nbytes) for intercept_grad in intercept_grads]
-            activations_gpu = [cuda.mem_alloc(activation.nbytes) for activation in activations]
-            intercepts_gpu = [cuda.mem_alloc(intercept.nbytes) for intercept in self.intercepts_]
-            coefs_gpu = [cuda.mem_alloc(coef.nbytes) for coef in self.coefs_]
+            if early_stopping :
+                X_val_gpu = gpuarray.to_gpu(X_val)
+                y_val_gpu = gpuarray.to_gpu(y_val)
 
+			deltas_gpu = [gpuarray.to_gpu(delta) for delta in deltas]
+			coef_grads_gpu = [gpuarray.to_gpu(coef_grad) for coef_grad in coef_grads]
+			intercept_grads_gpu = [gpuarray.to_gpu(intercept_grad) for intercept_grad in intercept_grads]
+			activations_gpu = [gpuarray.to_gpu(activation) for activation in activations]
+			intercepts_gpu = [gpuarray.to_gpu(intercept) for intercept in self.intercepts_]
+			coefs_gpu = [gpuarray.to_gpu(coef) for coef in self.coefs_]
 
-            cuda.memcpy_htod(X_gpu, X)
-            cuda.memcpy_htod(y_gpu, y)
-            for i in range(len(deltas)) : cuda.memcpy_htod(deltas_gpu[i], deltas[i])
-            for i in range(len(coef_grads)) : cuda.memcpy_htod(coef_grads_gpu[i], coef_grads[i])
-            for i in range(len(intercept_grads)) : cuda.memcpy_htod(intercept_grads_gpu[i], intercept_grads[i])
-            for i in range(len(activations)) : cuda.memcpy_htod(activations_gpu[i], activations[i])
-            for i in range(len(self.intercepts_)) : cuda.memcpy_htod(intercepts_gpu[i], self.intercepts_[i])
-            for i in range(len(self.coefs_)) : cuda.memcpy_htod(coefs_gpu[i], self.coefs_[i])
-
-            batch_slices_gpu = gen_batches_gpu(n_samples, batch_size)
+			batch_slices_gpu = gen_batches_gpu(n_samples, batch_size)
+	
 
             for it in range(self.max_iter):
                 shuffle_gpu(X_gpu, y_gpu, random_state=self._random_state)
@@ -557,10 +553,10 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
 
                 # update no_improvement_count based on training loss or
                 # validation score according to early_stopping
-                self._update_no_improvement_count(early_stopping, X_val, y_val)
+                self._update_no_improvement_count(early_stopping, X_val, y_val) # TODO
 
                 # for learning rate that needs to be updated at iteration end
-                self._optimizer.iteration_ends(self.t_)
+                self._optimizer.iteration_ends(self.t_) # TODO
 
                 if self._no_improvement_count > 2:
                     # not better than last two iterations by tol.
@@ -573,7 +569,7 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
                                " for two consecutive epochs." % self.tol)
 
                     is_stopping = self._optimizer.trigger_stopping(
-                        msg, self.verbose)
+                        msg, self.verbose) # TODO
                     if is_stopping:
                         break
                     else:
