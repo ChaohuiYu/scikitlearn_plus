@@ -5,7 +5,6 @@
 
 import numpy as np
 
-from pycuda import cumath
 from pycuda import gpuarray
 import pycuda.driver as cuda
 import pycuda.autoinit
