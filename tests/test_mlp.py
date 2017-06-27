@@ -1,31 +1,57 @@
 import sys
 sys.path.append("../../")
 
-from scikitlearn_plus.neural_network import MLPRegressor as MLPRegressor_plus
-from sklearn.neural_network import MLPRegressor
+import numpy as np
+import timeit
+from scikitlearn_plus.neural_network import MLPRegressor_cuda as MLPRegressor_plus
+from scikitlearn_plus.neural_network import MLPRegressor
 
 X = [[0., 0., 0.], [1., 1., 1.]]
 y = [0, 1]
 
+testData = np.random.randn(10,10)
+
+X = np.random.randn(10000,10)
+y = np.random.randn(10000)
+
+X = X.astype(np.float32)
+y = y.astype(np.float32)
+
 # sklearn MLPRegressor
-clf = MLPRegressor(solver='sgd', alpha=1e-5,
-                    hidden_layer_sizes=(5, 2), random_state=1)
+regSgd = MLPRegressor(solver='sgd', alpha=1e-5,
+                    hidden_layer_sizes=(5, 5), random_state=1, max_iter=2000, verbose=True)
 
 # scikitlearn_plus MLPRegressor
-clf_plus = MLPRegressor_plus(solver='sgd', alpha=1e-5,
-                    hidden_layer_sizes=(5, 2), random_state=1)
+regSgd_plus = MLPRegressor_plus(solver='sgd', alpha=1e-5,
+                    hidden_layer_sizes=(5, 5), random_state=1, max_iter=2000, verbose=True)
 
- 
 
 print("------sklearn------")
-clf.fit(X, y) 
-print(clf.predict([[2., 2., 2.], [-1., -2., -3.]]))
-print([coef.shape for coef in clf.coefs_])
+regSgd.fit(X, y) 
+print(regSgd.predict(testData))
+print([coef for coef in regSgd.coefs_])
 print()
 
 
 print("------scikitlearn_plus------")
-clf_plus.fit(X,y)
-print(clf_plus.predict([[2., 2., 2.], [-1., -2., -3.]]))
-print([coef.shape for coef in clf_plus.coefs_])
+regSgd_plus.fit(X,y)
+print(regSgd_plus.predict(testData))
+print([coef for coef in regSgd_plus.coefs_])
 print()
+
+'''
+if __name__ == '__main__':
+    print('correctness check')
+    print()
+    correctnessTest()
+    print()
+
+    print('performance test')
+    print()
+    print('cpu:')
+    print(timeit.timeit("cpuPerformanceTest()", setup="from __main__ import cpuPerformanceTest", number=performanceTestTimes))
+    print()
+    print('gpu:')
+    print(timeit.timeit("dataToGpu()", setup="from __main__ import dataToGpu", number=1))
+    print(timeit.timeit("gpuPerformanceTest()", setup="from __main__ import gpuPerformanceTest", number=performanceTestTimes))
+'''
