@@ -189,12 +189,10 @@ def gpuPerformanceTest():
     _base_cuda.binary_log_loss(a_gpu, b_gpu)
 
 if __name__ == '__main__':
-    '''
     print('correctness check')
     print()
     correctnessTest()
     print()
-    '''
 
     print('performance test')
     print()
@@ -202,5 +200,5 @@ if __name__ == '__main__':
     print(timeit.timeit("cpuPerformanceTest()", setup="from __main__ import cpuPerformanceTest", number=performanceTestTimes))
     print()
     print('gpu:')
-    print(timeit.timeit("gpuPerformanceTest()", setup="from __main__ import gpuPerformanceTest", number=1))
+    print(timeit.timeit("dataToGpu()", setup="from __main__ import dataToGpu", number=1))
     print(timeit.timeit("gpuPerformanceTest()", setup="from __main__ import gpuPerformanceTest", number=performanceTestTimes))
