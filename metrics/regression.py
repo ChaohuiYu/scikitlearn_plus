@@ -230,4 +230,5 @@ def r2_score(y_true, y_pred, sample_weight=None,
     else:
         avg_weights = multioutput
 
+    print('Ha')
     return np.average(output_scores, weights=avg_weights)
