@@ -9,7 +9,7 @@ import numpy as np
 from pycuda import gpuarray
 import pycuda.driver as cuda
 import pycuda.autoinit
-from pycuda.compiler import SourceModule
+import pycuda.cumath as cumath
 
 
 class BaseOptimizer(object):
@@ -32,8 +32,7 @@ class BaseOptimizer(object):
     """
 
     def __init__(self, params, learning_rate_init=0.1):
-        self.params = [gpuarray.to_gpu(param) for param in params]
-        print(params)
+        self.params = [param for param in params]
         self.learning_rate_init = learning_rate_init
         self.learning_rate = float(learning_rate_init)
 
@@ -46,9 +45,10 @@ class BaseOptimizer(object):
             Containing gradients with respect to coefs_ and intercepts_ in MLP
             model. So length should be aligned with params
         """
+        grads = [gpuarray.to_gpu(grad) for grad in grads]
         updates = self._get_updates(grads)
         for param, update in zip(self.params, updates):
-            param += update
+            param += update.get()
 
     def iteration_ends(self, time_step):
         """Perform update to learning rate and potentially other states at the
@@ -129,8 +129,7 @@ class SGDOptimizer(BaseOptimizer):
         self.momentum = momentum
         self.nesterov = nesterov
         self.power_t = power_t
-        self.velocities = [np.zeros_like(param) for param in params]
-        #self.velocities = [gpuarray.to_gpu(np.zeros_like(param)) for param in params]
+        self.velocities = [gpuarray.to_gpu(np.zeros_like(param)) for param in params]
 
     def iteration_ends(self, time_step):
         """Perform updates to learning rate and potential other states at the
@@ -243,8 +242,8 @@ class AdamOptimizer(BaseOptimizer):
         self.beta_2 = beta_2
         self.epsilon = epsilon
         self.t = 0
-        self.ms = [np.zeros_like(param) for param in params]
-        self.vs = [np.zeros_like(param) for param in params]
+        self.ms = [gpuarray.to_gpu(np.zeros_like(param)) for param in params]
+        self.vs = [gpuarray.to_gpu(np.zeros_like(param)) for param in params]
 
     def _get_updates(self, grads):
         """Get the values used to update params with given gradients
@@ -268,6 +267,6 @@ class AdamOptimizer(BaseOptimizer):
         self.learning_rate = (self.learning_rate_init *
                               np.sqrt(1 - self.beta_2 ** self.t) /
                               (1 - self.beta_1 ** self.t))
-        updates = [-self.learning_rate * m / (np.sqrt(v) + self.epsilon)
+        updates = [-self.learning_rate * m / (cumath.sqrt(v) + self.epsilon)
                    for m, v in zip(self.ms, self.vs)]
         return updates
