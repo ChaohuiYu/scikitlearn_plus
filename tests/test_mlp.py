@@ -3,11 +3,10 @@ sys.path.append("../../")
 
 import numpy as np
 import timeit
-from scikitlearn_plus.neural_network import MLPRegressor_cuda as MLPRegressor_plus
+from scikitlearn_plus.neural_network import MLPRegressor_cuda
 from scikitlearn_plus.neural_network import MLPRegressor
 
-X = [[0., 0., 0.], [1., 1., 1.]]
-y = [0, 1]
+import time
 
 testData = np.random.randn(10,10)
 
@@ -17,41 +16,58 @@ y = np.random.randn(10000)
 X = X.astype(np.float32)
 y = y.astype(np.float32)
 
-# sklearn MLPRegressor
+layer = (10, 10, 10, 10, 10)
+
+
+print('--------------sgd--------------')
+# sklearn MLPRegressor sgd
 regSgd = MLPRegressor(solver='sgd', alpha=1e-5,
-                    hidden_layer_sizes=(5, 5), random_state=1, max_iter=2000, verbose=True)
+                    hidden_layer_sizes=layer, random_state=1, max_iter=1000, verbose=True)
 
 # scikitlearn_plus MLPRegressor
-regSgd_plus = MLPRegressor_plus(solver='sgd', alpha=1e-5,
-                    hidden_layer_sizes=(5, 5), random_state=1, max_iter=2000, verbose=True)
-
+regSgd_cuda = MLPRegressor_cuda(solver='sgd', alpha=1e-5,
+                    hidden_layer_sizes=layer, random_state=1, max_iter=1000, verbose=True)
 
 print("------sklearn------")
+start = time.time()
 regSgd.fit(X, y) 
+stop = time.time()
+print('fit time:', stop - start)
 print(regSgd.predict(testData))
-print([coef for coef in regSgd.coefs_])
 print()
 
 
 print("------scikitlearn_plus------")
-regSgd_plus.fit(X,y)
-print(regSgd_plus.predict(testData))
-print([coef for coef in regSgd_plus.coefs_])
+start = time.time()
+regSgd_cuda.fit(X,y)
+stop = time.time()
+print('fit time:', stop - start)
+print(regSgd_cuda.predict(testData))
 print()
 
-'''
-if __name__ == '__main__':
-    print('correctness check')
-    print()
-    correctnessTest()
-    print()
 
-    print('performance test')
-    print()
-    print('cpu:')
-    print(timeit.timeit("cpuPerformanceTest()", setup="from __main__ import cpuPerformanceTest", number=performanceTestTimes))
-    print()
-    print('gpu:')
-    print(timeit.timeit("dataToGpu()", setup="from __main__ import dataToGpu", number=1))
-    print(timeit.timeit("gpuPerformanceTest()", setup="from __main__ import gpuPerformanceTest", number=performanceTestTimes))
-'''
+print('--------------adam--------------')
+# sklearn MLPRegressor adam
+regadam = MLPRegressor(solver='adam', alpha=1e-5,
+                    hidden_layer_sizes=layer, random_state=1, max_iter=1000, verbose=True)
+
+# scikitlearn_plus MLPRegressor
+regadam_cuda = MLPRegressor_cuda(solver='adam', alpha=1e-5,
+                    hidden_layer_sizes=layer, random_state=1, max_iter=1000, verbose=True)
+
+print("------sklearn------")
+start = time.time()
+regadam.fit(X, y) 
+stop = time.time()
+print('fit time:', stop - start)
+print(regadam.predict(testData))
+print()
+
+
+print("------scikitlearn_plus------")
+start = time.time()
+regadam_cuda.fit(X,y)
+stop = time.time()
+print('fit time:', stop - start)
+print(regadam_cuda.predict(testData))
+print()
