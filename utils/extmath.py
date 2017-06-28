@@ -13,10 +13,12 @@ Extended math utilities.
 
 import numpy as np
 #from scipy.sparse import issparse, csr_matrix
-from skcuda import linalg
-linalg.init()
+from pycuda import gpuarray
+import pycuda.autoinit
+import skcuda.linalg as culinalg
+culinalg.init()
 
-def safe_sparse_dot(a, b, dense_output=True):
+def safe_sparse_dot(a, b, transa='N', transb='N', dense_output=True):
     '''
     Parameters
     ----------
@@ -27,7 +29,7 @@ def safe_sparse_dot(a, b, dense_output=True):
     -------
     dot_product : array
     '''
-    return linalg.dot(a, b)
+    return culinalg.dot(a, b, transa, transb)
 
     
     """Dot product that handle the sparse matrix case correctly

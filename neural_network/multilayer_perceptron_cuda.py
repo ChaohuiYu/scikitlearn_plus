@@ -13,8 +13,8 @@ from scipy.optimize import fmin_l_bfgs_b
 import warnings
 
 from sklearn.base import BaseEstimator
-from ._base import ACTIVATIONS, DERIVATIVES, LOSS_FUNCTIONS
-from ._stochastic_optimizers import SGDOptimizer, AdamOptimizer
+from ._base_cuda import ACTIVATIONS, DERIVATIVES, LOSS_FUNCTIONS
+from ._stochastic_optimizers_cuda import SGDOptimizer, AdamOptimizer
 from sklearn.model_selection import train_test_split
 from sklearn.externals import six
 from sklearn.preprocessing import LabelBinarizer
@@ -22,7 +22,7 @@ from sklearn.utils import gen_batches, check_random_state
 from sklearn.utils import shuffle
 from sklearn.utils import check_array, check_X_y, column_or_1d
 from sklearn.exceptions import ConvergenceWarning
-from sklearn.utils.extmath import safe_sparse_dot
+from ..utils.extmath import safe_sparse_dot
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.multiclass import _check_partial_fit_first_call, unique_labels
 from sklearn.utils.multiclass import type_of_target
@@ -33,6 +33,11 @@ import pycuda.driver as cuda
 import pycuda.autoinit
 from pycuda.compiler import SourceModule
 import pycuda.gpuarray as gpuarray
+
+import skcuda.misc as cumisc
+import skcuda.linalg as culinalg
+cumisc.init()
+culinalg.init()
 
 _STOCHASTIC_SOLVERS = ['sgd', 'adam']
 
@@ -74,7 +79,7 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         self.warm_start = warm_start
         self.momentum = momentum
         self.nesterovs_momentum = nesterovs_momentum
-        self.early_stopping = early_stopping
+        self.early_stopping = False
         self.validation_fraction = validation_fraction
         self.beta_1 = beta_1
         self.beta_2 = beta_2
@@ -108,7 +113,7 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         for i in range(self.n_layers_ - 1):
             activations[i + 1] = safe_sparse_dot(activations[i],
                                                  self.coefs_[i])
-            activations[i + 1] += self.intercepts_[i]
+            activations[i + 1] = cumisc.add_matvec(activations[i + 1], self.intercepts_[i], axis=1)
 
             # For the hidden layers
             if (i + 1) != (self.n_layers_ - 1):
@@ -127,12 +132,14 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
 
         This function does backpropagation for the specified one layer.
         """
-        coef_grads[layer] = safe_sparse_dot(activations[layer].T,
-                                            deltas[layer])
-        coef_grads[layer] += (self.alpha * self.coefs_[layer])
-        coef_grads[layer] /= n_samples
+        coef_grads[layer] = safe_sparse_dot(activations[layer],
+                                            deltas[layer],
+                                            'T',
+                                            'N')
 
-        intercept_grads[layer] = np.mean(deltas[layer], 0)
+        coef_grads[layer] = (coef_grads[layer] + (self.alpha * self.coefs_[layer])) / n_samples
+
+        intercept_grads[layer] = cumisc.mean(deltas[layer], 0)
 
         return coef_grads, intercept_grads
 
@@ -186,8 +193,8 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         grad = _pack(coef_grads, intercept_grads)
         return loss, grad
 
-    def _backprop(self, n_samples, X_gpu, y_gpu, batch_slice_gpu, activations_gpu, deltas_gpu, coef_grads_gpu,
-                  intercept_grads_gpu, intercepts_gpu, coefs_gpu):
+    def _backprop(self, X, y, activations, deltas, coef_grads,
+                  intercept_grads):
         """Compute the MLP loss function and its corresponding derivatives
         with respect to each parameter: weights and bias vectors.
 
@@ -223,20 +230,20 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         coef_grads : list, length = n_layers - 1
         intercept_grads : list, length = n_layers - 1
         """
-        #n_samples = X.shape[0]
+        n_samples = X.shape[0]
 
         # Forward propagate
-        forward_pass_gpu(activations_gpu) # TODO
+        activations = self._forward_pass(activations)
 
         # Get loss
         loss_func_name = self.loss
         if loss_func_name == 'log_loss' and self.out_activation_ == 'logistic':
             loss_func_name = 'binary_log_loss'
         
-        loss = LOSS_FUNCTIONS_GPU[loss_func_name](y_gpu, activations_gpu[-1]) # TODO
+        loss = LOSS_FUNCTIONS[loss_func_name](y, activations[-1]) # TODO
         # Add L2 regularization term to loss
         values = np.sum(
-            np.array([np.dot(s.ravel(), s.ravel()) for s in coefs_gpu])) #TODO
+                    np.array([culinalg.dot(s.ravel(), s.ravel()) for s in self.coefs_])) #TODO
         loss += (0.5 * self.alpha) * values / n_samples
 
         # Backward propagate
@@ -246,23 +253,23 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         # combinations of output activation and loss function:
         # sigmoid and binary cross entropy, softmax and categorical cross
         # entropy, and identity with squared loss
-        deltas_gpu[last] = activations_gpu[-1] - y_gpu # TODO
+        deltas[last] = activations[-1] - y # TODO
 
         # Compute gradient for the last layer
-        coef_grads_gpu, intercept_grads_gpu = self._compute_loss_grad_gpu(
-            last, n_samples, activations_gpu, deltas_gpu, coef_grads_gpu, intercept_grads_gpu) # TODO
+        coef_grads, intercept_grads = self._compute_loss_grad(
+            last, n_samples, activations, deltas, coef_grads, intercept_grads) # TODO
 
         # Iterate over the hidden layers
         for i in range(self.n_layers_ - 2, 0, -1):
-            deltas_gpu[i - 1] = safe_sparse_dot(deltas_gpu[i], self.coefs_gpu[i].T) # TODO
+            deltas[i - 1] = safe_sparse_dot(deltas[i], self.coefs_[i], 'N', 'T') # TODO
             inplace_derivative = DERIVATIVES[self.activation]
-            inplace_derivative(activations_gpu[i], deltas_gpu[i - 1]) # TODO
+            inplace_derivative(activations[i], deltas[i - 1]) # TODO
 
-            coef_grads_gpu, intercept_grads_gpu = self._compute_loss_grad_gpu(
-                i - 1, n_samples, activations_gpu, deltas_gpu, coef_grads_gpu,
-                intercept_grads_gpu) # TODO
+            coef_grads, intercept_grads = self._compute_loss_grad(
+                i - 1, n_samples, activations, deltas, coef_grads,
+                intercept_grads) # TODO
 
-        return loss
+        return loss, coef_grads, intercept_grads
 
     def _initialize(self, y, layer_units):
         # set all attributes, allocate weights etc for first call
@@ -474,6 +481,8 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
                         intercept_grads, layer_units, incremental):
 
         if not incremental or not hasattr(self, '_optimizer'):
+            self.coefs_ = [gpuarray.to_gpu(coef).astype(np.float32) for coef in self.coefs_]
+            self.intercepts_ = [gpuarray.to_gpu(intercept).astype(np.float32) for intercept in self.intercepts_]
             params = self.coefs_ + self.intercepts_
 
             if self.solver == 'sgd':
@@ -503,44 +512,60 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
             batch_size = np.clip(self.batch_size, 1, n_samples)
 
         try:
+            '''
             # TODO from here
             print("hi")
             print(self.loss, self.n_layers_, self.activation, self.out_activation_, self.alpha)
             print(activations)
             print(self.intercepts_)
             print(self.coefs_)
+            '''
 
-			X_gpu = gpuarray.to_gpu(X)
-			y_gpu = gpuarray.to_gpu(y)
+            X = gpuarray.to_gpu(X).astype(np.float32)
+            y = gpuarray.to_gpu(y).astype(np.float32)
+
 
             if early_stopping :
-                X_val_gpu = gpuarray.to_gpu(X_val)
-                y_val_gpu = gpuarray.to_gpu(y_val)
+                X_val = gpuarray.to_gpu(X_val).astype(np.float32)
+                y_val = gpuarray.to_gpu(y_val).astype(np.float32)
 
-			deltas_gpu = [gpuarray.to_gpu(delta) for delta in deltas]
-			coef_grads_gpu = [gpuarray.to_gpu(coef_grad) for coef_grad in coef_grads]
-			intercept_grads_gpu = [gpuarray.to_gpu(intercept_grad) for intercept_grad in intercept_grads]
-			activations_gpu = [gpuarray.to_gpu(activation) for activation in activations]
-			intercepts_gpu = [gpuarray.to_gpu(intercept) for intercept in self.intercepts_]
-			coefs_gpu = [gpuarray.to_gpu(coef) for coef in self.coefs_]
-
-			batch_slices_gpu = gen_batches_gpu(n_samples, batch_size)
+            deltas = [gpuarray.to_gpu(delta).astype(np.float32) for delta in deltas]
+            coef_grads = [gpuarray.to_gpu(coef_grad).astype(np.float32) for coef_grad in coef_grads]
+            intercept_grads = [gpuarray.to_gpu(intercept_grad).astype(np.float32) for intercept_grad in intercept_grads]
+            activations = [gpuarray.to_gpu(activation).astype(np.float32) for activation in activations]
 	
 
             for it in range(self.max_iter):
-                shuffle_gpu(X_gpu, y_gpu, random_state=self._random_state)
+                #shuffle_gpu(X_gpu, y_gpu, random_state=self._random_state)
                 accumulated_loss = 0.0
-                for batch_slice_gpu in batch_slices_gpu :
-                    activations_gpu[0] = X_gpu[batch_slice_gpu]
-                    batch_loss = backprop(
-                        n_samples, X_gpu, y_gpu, batch_slice_gpu, activations_gpu, deltas_gpu,
-                        coef_grads_gpu, intercept_grads_gpu, intercepts_gpu, coefs_gpu)
-                    accumulated_loss += batch_loss * (batch_slice_gpu.stop -
-                                                      batch_slice_gpu.start)
+
+
+                activations[0] = X
+                batch_loss, coef_grads, intercept_grads = self._backprop(
+                    X, y, activations, deltas,
+                    coef_grads, intercept_grads)
+                accumulated_loss += batch_loss * X.shape[0]
+
+                # update weights
+                grads = coef_grads + intercept_grads
+                self._optimizer.update_params(grads)
+
+                # slice
+                '''
+                for batch_slice in gen_batches(n_samples, batch_size):
+                    activations[0] = X[batch_slice]
+                    batch_loss, coef_grads, intercept_grads = self._backprop(
+                        X[batch_slice], y[batch_slice], activations, deltas,
+                        coef_grads, intercept_grads)
+                    accumulated_loss += batch_loss * (batch_slice.stop -
+                                                      batch_slice.start)
 
                     # update weights
-                    grads_gpu = coef_grads_gpu + intercept_grads_gpu
-                    self._optimizer.update_params(grads_gpu)
+                    grads = coef_grads + intercept_grads
+                    print(grads)
+                    self._optimizer.update_params(grads)
+                '''
+
 
                 self.n_iter_ += 1
                 self.loss_ = accumulated_loss / X.shape[0]
@@ -682,6 +707,10 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         """
         X = check_array(X, accept_sparse=['csr', 'csc', 'coo'])
 
+        dataType = X.dtype
+
+        X = gpuarray.to_gpu(X).astype(np.float32)
+
         # Make sure self.hidden_layer_sizes is a list
         hidden_layer_sizes = self.hidden_layer_sizes
         if not hasattr(hidden_layer_sizes, "__iter__"):
@@ -695,8 +724,8 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         activations = [X]
 
         for i in range(self.n_layers_ - 1):
-            activations.append(np.empty((X.shape[0],
-                                         layer_units[i + 1])))
+            activations.append(gpuarray.empty((X.shape[0],
+                                         layer_units[i + 1]), dataType))
         # forward propagate
         self._forward_pass(activations)
         y_pred = activations[-1]

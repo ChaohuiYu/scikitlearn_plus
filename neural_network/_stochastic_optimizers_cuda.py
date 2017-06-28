@@ -45,10 +45,9 @@ class BaseOptimizer(object):
             Containing gradients with respect to coefs_ and intercepts_ in MLP
             model. So length should be aligned with params
         """
-        grads = [gpuarray.to_gpu(grad) for grad in grads]
         updates = self._get_updates(grads)
         for param, update in zip(self.params, updates):
-            param += update.get()
+            param += update
 
     def iteration_ends(self, time_step):
         """Perform update to learning rate and potentially other states at the
@@ -129,7 +128,7 @@ class SGDOptimizer(BaseOptimizer):
         self.momentum = momentum
         self.nesterov = nesterov
         self.power_t = power_t
-        self.velocities = [gpuarray.to_gpu(np.zeros_like(param)) for param in params]
+        self.velocities = [gpuarray.zeros_like(param) for param in params]
 
     def iteration_ends(self, time_step):
         """Perform updates to learning rate and potential other states at the
@@ -242,8 +241,8 @@ class AdamOptimizer(BaseOptimizer):
         self.beta_2 = beta_2
         self.epsilon = epsilon
         self.t = 0
-        self.ms = [gpuarray.to_gpu(np.zeros_like(param)) for param in params]
-        self.vs = [gpuarray.to_gpu(np.zeros_like(param)) for param in params]
+        self.ms = [gpuarray.zeros_like(param) for param in params]
+        self.vs = [gpuarray.zeros_like(param) for param in params]
 
     def _get_updates(self, grads):
         """Get the values used to update params with given gradients
