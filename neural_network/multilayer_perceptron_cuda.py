@@ -240,6 +240,7 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
         if loss_func_name == 'log_loss' and self.out_activation_ == 'logistic':
             loss_func_name = 'binary_log_loss'
         
+        print(y.shape, activations[-1].shape)
         loss = LOSS_FUNCTIONS[loss_func_name](y, activations[-1]) # TODO
         # Add L2 regularization term to loss
         values = np.sum(
@@ -534,21 +535,24 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
             intercept_grads = [gpuarray.to_gpu(intercept_grad).astype(np.float32) for intercept_grad in intercept_grads]
             activations = [gpuarray.to_gpu(activation).astype(np.float32) for activation in activations]
 	
+            X_batch_slices = [X[i*batch_size:(i+1)*batch_size] for i in range(X.shape[0]//batch_size+1)]
+            y_batch_slices = [y[i*batch_size:(i+1)*batch_size] for i in range(y.shape[0]//batch_size+1)]
 
             for it in range(self.max_iter):
                 #shuffle_gpu(X_gpu, y_gpu, random_state=self._random_state)
                 accumulated_loss = 0.0
 
+                for cnt, (X_batch, y_batch) in enumerate(zip(X_batch_slices, y_batch_slices)):
+                    activations[0] = X_batch
+                    batch_loss, coef_grads, intercept_grads = self._backprop(
+                        X_batch, y_batch, activations, deltas,
+                        coef_grads, intercept_grads)
+                    print('hi')
+                    accumulated_loss += batch_loss * X_batch.shape[0]
 
-                activations[0] = X
-                batch_loss, coef_grads, intercept_grads = self._backprop(
-                    X, y, activations, deltas,
-                    coef_grads, intercept_grads)
-                accumulated_loss += batch_loss * X.shape[0]
-
-                # update weights
-                grads = coef_grads + intercept_grads
-                self._optimizer.update_params(grads)
+                    # update weights
+                    grads = coef_grads + intercept_grads
+                    self._optimizer.update_params(grads)
 
                 # slice
                 '''
