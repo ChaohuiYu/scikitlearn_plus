@@ -499,8 +499,20 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
 
         try:
             for it in range(self.max_iter):
-                X, y = shuffle(X, y, random_state=self._random_state)
+                #X, y = shuffle(X, y, random_state=self._random_state)
                 accumulated_loss = 0.0
+
+                activations[0] = X
+                batch_loss, coef_grads, intercept_grads = self._backprop(
+                    X, y, activations, deltas,
+                    coef_grads, intercept_grads)
+                accumulated_loss += batch_loss * X.shape[0]
+
+                # update weights
+                grads = coef_grads + intercept_grads
+                self._optimizer.update_params(grads)
+
+                '''
                 for batch_slice in gen_batches(n_samples, batch_size):
                     activations[0] = X[batch_slice]
                     batch_loss, coef_grads, intercept_grads = self._backprop(
@@ -512,9 +524,12 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
                     # update weights
                     grads = coef_grads + intercept_grads
                     self._optimizer.update_params(grads)
+                '''
+                
 
                 self.n_iter_ += 1
                 self.loss_ = accumulated_loss / X.shape[0]
+
 
                 self.t_ += n_samples
                 self.loss_curve_.append(self.loss_)
