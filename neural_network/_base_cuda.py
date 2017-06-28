@@ -10,8 +10,8 @@ import pycuda.driver as cuda
 import pycuda.autoinit
 from pycuda.compiler import SourceModule
 
-import skcuda.misc as misc
-
+import skcuda.misc as cumisc
+cumisc.init()
 
 blockSize = 192
 
@@ -268,7 +268,7 @@ def squared_loss(y_true, y_pred):
             np.int32(y_true.size),
             block=(blockSize, 1, 1),
             grid=(int((y_true.size - 1) / blockSize + 1), 1, 1))
-    mean = float(misc.mean(tmp_gpu).get())
+    mean = float(cumisc.mean(tmp_gpu).get())
     return (mean / 2)
 
 
@@ -331,7 +331,7 @@ def log_loss(y_true, y_prob):
             block=(blockSize, 1, 1),
             grid=(int((y_prob.size - 1) / blockSize + 1), 1, 1))
     #total = float(misc.sum(y_true * tmp_gpu).get())
-    total = float(misc.sum(tmp_gpu).get())
+    total = float(cumisc.sum(tmp_gpu).get())
     return (-total) / y_prob.shape[0]
 
 
@@ -390,7 +390,7 @@ def binary_log_loss(y_true, y_prob):
             block=(blockSize, 1, 1),
             grid=(int((y_prob.size - 1) / blockSize + 1), 1, 1))
 
-    total = float(misc.sum(tmp_gpu).get())
+    total = float(cumisc.sum(tmp_gpu).get())
     return (-total) / y_prob.shape[0]
 
 
