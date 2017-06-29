@@ -539,11 +539,10 @@ class BaseMultilayerPerceptron(six.with_metaclass(ABCMeta, BaseEstimator)):
                 #shuffle_gpu(X_gpu, y_gpu, random_state=self._random_state)
                 accumulated_loss = 0.0
 
-
                 activations[0] = X
                 batch_loss, coef_grads, intercept_grads = self._backprop(
-                    X, y, activations, deltas,
-                    coef_grads, intercept_grads)
+		    X, y, activations, deltas,
+		    coef_grads, intercept_grads)
                 accumulated_loss += batch_loss * X.shape[0]
 
                 # update weights
