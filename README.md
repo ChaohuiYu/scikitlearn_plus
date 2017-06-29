@@ -15,4 +15,4 @@ A cuda version of sklearn MLPRegressor
   booktitle = {ECML PKDD Workshop: Languages for Data Mining and Machine Learning},
   year      = {2013},
   pages = {108--122},
-}
+}}
