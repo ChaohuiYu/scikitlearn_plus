@@ -6,27 +6,52 @@ import timeit
 from scikitlearn_plus.neural_network import MLPRegressor_cuda
 from scikitlearn_plus.neural_network import MLPRegressor
 
+import keras
+
+
 import time
 
 testData = np.random.randn(10,10)
 
-X = np.random.randn(10000,10)
-y = np.random.randn(10000)
+X = np.random.randn(100,10)
+y = np.random.randn(100)
 
 X = X.astype(np.float32)
 y = y.astype(np.float32)
 
 layer = (10, 10, 10, 10, 10)
 
+dnnInput = keras.layers.Input(shape = (X.shape[1],))
+dnn = keras.layers.Dense(10, activation='linear')(dnnInput)
+dnn = keras.layers.Dense(10, activation='linear')(dnn)
+dnn = keras.layers.Dense(10, activation='linear')(dnn)
+dnn = keras.layers.Dense(10, activation='linear')(dnn)
+dnn = keras.layers.Dense(10, activation='linear')(dnn)
+dnn = keras.layers.Dense(1, activation='linear')(dnn)
+DNN = keras.models.Model(inputs=dnnInput, outputs=dnn)
+DNN.compile(loss='mean_absolute_error', optimizer='adam')
+DNN.summary()
+start = time.time()
+history = DNN.fit(
+            X, y,
+            batch_size=1024,
+            )
+stop = time.time()
+print('fit time:', stop - start)
+print(DNN.predict(testData))
+print()
+
+
+
 
 print('--------------sgd--------------')
 # sklearn MLPRegressor sgd
 regSgd = MLPRegressor(solver='sgd', alpha=1e-5,
-                    hidden_layer_sizes=layer, random_state=1, max_iter=1000, verbose=True)
+                    hidden_layer_sizes=layer, random_state=1, max_iter=10, verbose=True)
 
-# scikitlearn_plus MLPRegressor
+# scikitlearn_plus MLPRegressors
 regSgd_cuda = MLPRegressor_cuda(solver='sgd', alpha=1e-5,
-                    hidden_layer_sizes=layer, random_state=1, max_iter=1000, verbose=True)
+                    hidden_layer_sizes=layer, random_state=1, max_iter=10, verbose=True)
 
 print("------sklearn------")
 start = time.time()
